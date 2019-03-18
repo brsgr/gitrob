@@ -19,30 +19,31 @@ func GatherTargets(sess *core.Session) {
   sess.Stats.Status = core.StatusGathering
   sess.Out.Important("Gathering targets...\n")
   for _, login := range sess.Options.Logins {
-    target, err := core.GetUserOrOrganization(login, sess.GitlabClient)
+    target, err := core.GetUserOrOrganization(login, sess)
     if err != nil {
       sess.Out.Error(" Error retrieving information on %s: %s\n", login, err)
       continue
     }
-    sess.Out.Debug("%s (ID: %d) type: %s\n", *target.Login, *target.ID, *target.Type)
+
+    sess.Out.Debug("%s (ID: %d) type: %s\n", target.Username, target.ID, target.State)
     sess.AddTarget(target)
-    if *sess.Options.NoExpandOrgs == false && *target.Type == "Organization" {
-      sess.Out.Debug("Gathering members of %s (ID: %d)...\n", *target.Login, *target.ID)
-      members, err := core.GetOrganizationMembers(target.Login, sess.GitlabClient)
-      if err != nil {
-        sess.Out.Error(" Error retrieving members of %s: %s\n", *target.Login, err)
-        continue
-      }
-      for _, member := range members {
-        sess.Out.Debug("Adding organization member %s (ID: %d) to targets\n", *member.Login, *member.ID)
-        sess.AddTarget(member)
-      }
-    }
+    //if *sess.Options.NoExpandOrgs == false && target.Type == "Organization" {
+    //  sess.Out.Debug("Gathering members of %s (ID: %d)...\n", target.Username, target.ID)
+    //  members, err := core.GetOrganizationMembers(target.Username, sess.GitlabClient)
+    //  if err != nil {
+    //    sess.Out.Error(" Error retrieving members of %s: %s\n", target.Username, err)
+    //    continue
+    //  }
+    //  for _, member := range members {
+    //    sess.Out.Debug("Adding organization member %s (ID: %d) to targets\n", *member.Login, *member.ID)
+    //    sess.AddTarget(member)
+    //  }
+    //}
   }
 }
 
 func GatherRepositories(sess *core.Session) {
-  var ch = make(chan *core.GithubOwner, len(sess.Targets))
+  var ch = make(chan *core.GitlabOwner, len(sess.Targets))
   var wg sync.WaitGroup
   var threadNum int
   if len(sess.Targets) == 1 {
@@ -62,19 +63,19 @@ func GatherRepositories(sess *core.Session) {
           wg.Done()
           return
         }
-        repos, err := core.GetRepositoriesFromOwner(target.Login, sess.GitlabClient)
+        repos, err := core.GetRepositoriesFromOwner(target.Username, sess)
         if err != nil {
-          sess.Out.Error(" Failed to retrieve repositories from %s: %s\n", *target.Login, err)
+          sess.Out.Error(" Failed to retrieve repositories from %s: %s\n", target.Username, err)
         }
         if len(repos) == 0 {
           continue
         }
         for _, repo := range repos {
-          sess.Out.Debug(" Retrieved repository: %s\n", *repo.FullName)
+          sess.Out.Debug(" Retrieved repository: %s\n", repo.Path)
           sess.AddRepository(repo)
         }
         sess.Stats.IncrementTargets()
-        sess.Out.Info(" Retrieved %d %s from %s\n", len(repos), core.Pluralize(len(repos), "repository", "repositories"), *target.Login)
+        sess.Out.Info(" Retrieved %d %s from %s\n", len(repos), core.Pluralize(len(repos), "repository", "repositories"), target.Username)
       }
     }()
   }
@@ -88,7 +89,7 @@ func GatherRepositories(sess *core.Session) {
 
 func AnalyzeRepositories(sess *core.Session) {
   sess.Stats.Status = core.StatusAnalyzing
-  var ch = make(chan *core.GithubRepository, len(sess.Repositories))
+  var ch = make(chan core.GitlabRepo, len(sess.Repositories))
   var wg sync.WaitGroup
   var threadNum int
   if len(sess.Repositories) <= 1 {
@@ -114,41 +115,41 @@ func AnalyzeRepositories(sess *core.Session) {
           return
         }
 
-        sess.Out.Debug("[THREAD #%d][%s] Cloning repository...\n", tid, *repo.FullName)
-        clone, path, err := core.CloneRepository(repo.CloneURL, repo.DefaultBranch, *sess.Options.CommitDepth)
+        sess.Out.Debug("[THREAD #%d][%s] Cloning repository...\n", tid, repo.Path)
+        clone, path, err := core.CloneRepository(repo.HttpUrlToRepo, repo.DefaultBranch, *sess.Options.CommitDepth, sess.GithubAccessToken)
         if err != nil {
           if err.Error() != "remote repository is empty" {
-            sess.Out.Error("Error cloning repository %s: %s\n", *repo.FullName, err)
+            sess.Out.Error("Error cloning repository %s: %s\n", repo.Path, err)
           }
           sess.Stats.IncrementRepositories()
           sess.Stats.UpdateProgress(sess.Stats.Repositories, len(sess.Repositories))
           continue
         }
-        sess.Out.Debug("[THREAD #%d][%s] Cloned repository to: %s\n", tid, *repo.FullName, path)
+        sess.Out.Debug("[THREAD #%d][%s] Cloned repository to: %s\n", tid, repo.Path, path)
 
         history, err := core.GetRepositoryHistory(clone)
         if err != nil {
-          sess.Out.Error("[THREAD #%d][%s] Error getting commit history: %s\n", tid, *repo.FullName, err)
+          sess.Out.Error("[THREAD #%d][%s] Error getting commit history: %s\n", tid, repo.Path, err)
           os.RemoveAll(path)
           sess.Stats.IncrementRepositories()
           sess.Stats.UpdateProgress(sess.Stats.Repositories, len(sess.Repositories))
           continue
         }
-        sess.Out.Debug("[THREAD #%d][%s] Number of commits: %d\n", tid, *repo.FullName, len(history))
+        sess.Out.Debug("[THREAD #%d][%s] Number of commits: %d\n", tid, repo.Path, len(history))
 
         for _, commit := range history {
-          sess.Out.Debug("[THREAD #%d][%s] Analyzing commit: %s\n", tid, *repo.FullName, commit.Hash)
+          sess.Out.Debug("[THREAD #%d][%s] Analyzing commit: %s\n", tid, repo.Path, commit.Hash)
           changes, _ := core.GetChanges(commit, clone)
-          sess.Out.Debug("[THREAD #%d][%s] Changes in %s: %d\n", tid, *repo.FullName, commit.Hash, len(changes))
+          sess.Out.Debug("[THREAD #%d][%s] Changes in %s: %d\n", tid, repo.Path, commit.Hash, len(changes))
           for _, change := range changes {
             changeAction := core.GetChangeAction(change)
             path := core.GetChangePath(change)
             matchFile := core.NewMatchFile(path)
             if matchFile.IsSkippable() {
-              sess.Out.Debug("[THREAD #%d][%s] Skipping %s\n", tid, *repo.FullName, matchFile.Path)
+              sess.Out.Debug("[THREAD #%d][%s] Skipping %s\n", tid, repo.Path, matchFile.Path)
               continue
             }
-            sess.Out.Debug("[THREAD #%d][%s] Matching: %s...\n", tid, *repo.FullName, matchFile.Path)
+            sess.Out.Debug("[THREAD #%d][%s] Matching: %s...\n", tid, repo.Path, matchFile.Path)
             for _, signature := range core.Signatures {
               if signature.Match(matchFile) {
 
@@ -157,8 +158,8 @@ func AnalyzeRepositories(sess *core.Session) {
                   Action:          changeAction,
                   Description:     signature.Description(),
                   Comment:         signature.Comment(),
-                  RepositoryOwner: *repo.Owner,
-                  RepositoryName:  *repo.Name,
+                  //RepositoryOwner: repo.Owner,
+                  RepositoryName:  repo.Name,
                   CommitHash:      commit.Hash.String(),
                   CommitMessage:   strings.TrimSpace(commit.Message),
                   CommitAuthor:    commit.Author.String(),
@@ -168,7 +169,7 @@ func AnalyzeRepositories(sess *core.Session) {
 
                 sess.Out.Warn(" %s: %s\n", strings.ToUpper(changeAction), finding.Description)
                 sess.Out.Info("  Path.......: %s\n", finding.FilePath)
-                sess.Out.Info("  Repo.......: %s\n", *repo.FullName)
+                sess.Out.Info("  Repo.......: %s\n", repo.Path)
                 sess.Out.Info("  Message....: %s\n", core.TruncateString(finding.CommitMessage, 100))
                 sess.Out.Info("  Author.....: %s\n", finding.CommitAuthor)
                 if finding.Comment != "" {
@@ -184,11 +185,11 @@ func AnalyzeRepositories(sess *core.Session) {
             sess.Stats.IncrementFiles()
           }
           sess.Stats.IncrementCommits()
-          sess.Out.Debug("[THREAD #%d][%s] Done analyzing changes in %s\n", tid, *repo.FullName, commit.Hash)
+          sess.Out.Debug("[THREAD #%d][%s] Done analyzing changes in %s\n", tid, repo.Path, commit.Hash)
         }
-        sess.Out.Debug("[THREAD #%d][%s] Done analyzing commits\n", tid, *repo.FullName)
+        sess.Out.Debug("[THREAD #%d][%s] Done analyzing commits\n", tid, repo.Path)
         os.RemoveAll(path)
-        sess.Out.Debug("[THREAD #%d][%s] Deleted %s\n", tid, *repo.FullName, path)
+        sess.Out.Debug("[THREAD #%d][%s] Deleted %s\n", tid, repo.Path, path)
         sess.Stats.IncrementRepositories()
         sess.Stats.UpdateProgress(sess.Stats.Repositories, len(sess.Repositories))
       }

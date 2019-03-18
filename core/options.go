@@ -15,6 +15,7 @@ type Options struct {
   Port              *int
   Silent            *bool
   Debug             *bool
+  BaseUrl           *string
   Logins            []string
 }
 
@@ -30,6 +31,7 @@ func ParseOptions() (Options, error) {
     Port:              flag.Int("port", 9393, "Port to run web server on"),
     Silent:            flag.Bool("silent", false, "Suppress all output except for errors"),
     Debug:             flag.Bool("debug", false, "Print debugging information"),
+    BaseUrl:           flag.String("base-url", "https://git.ckmnet.co/api/v4", "default gitlab api url"),
   }
 
   flag.Parse()

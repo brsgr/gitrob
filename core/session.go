@@ -50,7 +50,7 @@ type Session struct {
   GitlabClient      *gitlab.Client `json:"-"`
   Router            *gin.Engine    `json:"-"`
   Targets           []*GitlabOwner
-  Repositories      []*GitlabRepository
+  Repositories      []GitlabRepo
   Findings          []*Finding
 }
 
@@ -79,7 +79,7 @@ func (s *Session) AddTarget(target *GitlabOwner) {
   s.Targets = append(s.Targets, target)
 }
 
-func (s *Session) AddRepository(repository *GitlabRepository) {
+func (s *Session) AddRepository(repository GitlabRepo) {
   s.Lock()
   defer s.Unlock()
   for _, r := range s.Repositories {
@@ -136,7 +136,6 @@ func (s *Session) InitGithubClient() {
     &oauth2.Token{AccessToken: s.GithubAccessToken},
   )
   tc := oauth2.NewClient(ctx, ts)
-	runtime.Breakpoint()
   s.GitlabClient = gitlab.NewClient(tc, s.GithubAccessToken)
 	s.GitlabClient.SetBaseURL("https://git.ckmnet.co/api/v4")
   s.GitlabClient.UserAgent = fmt.Sprintf("%s v%s", Name, Version)
