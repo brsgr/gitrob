@@ -6,6 +6,7 @@
 *.dylib
 gitrob
 gitrob.exe
+access_token
 
 vendor/
 build/

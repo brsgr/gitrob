@@ -12,7 +12,7 @@ import (
   "time"
 
   "github.com/gin-gonic/gin"
-  "github.com/google/go-github/github"
+  "github.com/xanzy/go-gitlab"
   "golang.org/x/oauth2"
 )
 
@@ -47,10 +47,10 @@ type Session struct {
   Out               *Logger `json:"-"`
   Stats             *Stats
   GithubAccessToken string         `json:"-"`
-  GithubClient      *github.Client `json:"-"`
+  GitlabClient      *gitlab.Client `json:"-"`
   Router            *gin.Engine    `json:"-"`
-  Targets           []*GithubOwner
-  Repositories      []*GithubRepository
+  Targets           []*GitlabOwner
+  Repositories      []GitlabRepo
   Findings          []*Finding
 }
 
@@ -68,22 +68,22 @@ func (s *Session) Finish() {
   s.Stats.Status = StatusFinished
 }
 
-func (s *Session) AddTarget(target *GithubOwner) {
+func (s *Session) AddTarget(target *GitlabOwner) {
   s.Lock()
   defer s.Unlock()
   for _, t := range s.Targets {
-    if *target.ID == *t.ID {
+    if target.ID == t.ID {
       return
     }
   }
   s.Targets = append(s.Targets, target)
 }
 
-func (s *Session) AddRepository(repository *GithubRepository) {
+func (s *Session) AddRepository(repository GitlabRepo) {
   s.Lock()
   defer s.Unlock()
   for _, r := range s.Repositories {
-    if *repository.ID == *r.ID {
+    if repository.ID == r.ID {
       return
     }
   }
@@ -136,8 +136,9 @@ func (s *Session) InitGithubClient() {
     &oauth2.Token{AccessToken: s.GithubAccessToken},
   )
   tc := oauth2.NewClient(ctx, ts)
-  s.GithubClient = github.NewClient(tc)
-  s.GithubClient.UserAgent = fmt.Sprintf("%s v%s", Name, Version)
+  s.GitlabClient = gitlab.NewClient(tc, s.GithubAccessToken)
+	s.GitlabClient.SetBaseURL("https://git.ckmnet.co/api/v4")
+  s.GitlabClient.UserAgent = fmt.Sprintf("%s v%s", Name, Version)
 }
 
 func (s *Session) InitThreads() {
