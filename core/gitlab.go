@@ -6,8 +6,9 @@ import (
   "strconv"
   "fmt"
   "net/http"
-	"io/ioutil"
-	"encoding/json"
+  "io/ioutil"
+  "encoding/json"
+  //"reflect"
   //"strconv"
 )
 
@@ -17,16 +18,16 @@ type GitlabOwner struct {
   Username     string
   State        string
   AvatarUrl    string `json:"avatar_url"`
-  WebUrl			 string `json:"web_url"`
+  WebUrl       string `json:"web_url"`
   //CreatedAt    string
-  //Bio				   string
+  //Bio          string
   //Location     string
   //PublicEmail  string
-	//Skype				 string
-	//Linkedin     string
-	//Twitter      string
-	//WebsiteUrl   string
-	//Organization string
+  //Skype        string
+  //Linkedin     string
+  //Twitter      string
+  //WebsiteUrl   string
+  //Organization string
 }
 
 
@@ -43,38 +44,72 @@ type GitlabRepository struct {
 }
 
 type GitlabRepo struct {
-	Owner				  GitlabOwner
-	ID						int
-	Path					string
-	Name					string
-	Description		string `json:"description"`
-	DefaultBranch string `json:"default_branch"`
-	HttpUrlToRepo string `json:"http_url_to_repo"`
+  Owner         GitlabOwner
+  ID            int
+  Path          string
+  Name          string
+  Description   string `json:"description"`
+  DefaultBranch string `json:"default_branch"`
+  HttpUrlToRepo string `json:"http_url_to_repo"`
 }
 
 type Response struct {
-	repos				[]GitlabRepo
+  repos       []GitlabRepo
 }
+
+// Equal tells whether a and b contain the same elements.
+// A nil argument is equivalent to an empty slice.
+func Equal(a, b []string) bool {
+  if len(a) != len(b) {
+    return false
+  }
+  for i, v := range a {
+    if v != b[i] {
+      return false
+    }
+  }
+  return true
+
+}
+
+func HandleApiCall(apiUrl string, token string) ([]uint8, error, http.Header) {
+  // pagination is stored in headers in the gitlab api
+  body := make([]uint8, 0)
+  url := apiUrl
+
+  // while loop to catch all paginated keys
+   resp, err := http.Get(url)
+   if err != nil {
+     return nil, err, nil
+     }
+   defer resp.Body.Close()
+   header := resp.Header
+
+   bodyNext, _ := ioutil.ReadAll(resp.Body)
+   body = append(body, bodyNext...)
+   return body, nil, header
+
+}
+
+
 
 func GetUserId(login string, apiUrl string, token string) (string, error) {
   // string are more efficient to concat as bytes
   var b bytes.Buffer
-	users := make([]GitlabOwner, 0)
+  users := make([]GitlabOwner, 0)
 
   b.WriteString(apiUrl)
   b.WriteString(fmt.Sprintf("/users?username=%s&private_token=%s", login, token))
 
-  resp, err := http.Get(b.String())
-
+  body, err, _ := HandleApiCall(b.String(), token)
   if err != nil {
     return "", err
     }
 
-	defer resp.Body.Close()
-  body, _ := ioutil.ReadAll(resp.Body)
   _ = json.Unmarshal(body, &users)
 
-	userId := strconv.Itoa(users[0].ID)
+  // assume there is only a single user with this username
+  userId := strconv.Itoa(users[0].ID)
 
   return userId, nil
 }
@@ -85,24 +120,20 @@ func GetUserOrOrganization(login string, sess *Session) (*GitlabOwner, error) {
 
   // make new api call to get the id from login
   userId, _ := GetUserId(login, *sess.Options.BaseUrl, sess.GithubAccessToken)
+  owner := GitlabOwner{}
 
   b.WriteString(*sess.Options.BaseUrl)
   b.WriteString(fmt.Sprintf("/users/%s?private_token=%s", userId, sess.GithubAccessToken))
 
-  resp, err := http.Get(b.String())
-
+  body, err, _ := HandleApiCall(b.String(), sess.GithubAccessToken)
   if err != nil {
     return nil, err
+    }
+  errJson := json.Unmarshal(body, &owner)
+
+  if errJson != nil {
+    return nil, err
   }
-
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	owner := GitlabOwner{}
-	errJson := json.Unmarshal(body, &owner)
-
-	if errJson != nil {
-		return nil, err
-	}
 
 
   return &owner, nil
@@ -112,29 +143,37 @@ func GetRepositoriesFromOwner(login string, sess *Session) ([]GitlabRepo, error)
   var b bytes.Buffer
 
   b.WriteString(*sess.Options.BaseUrl)
-  b.WriteString(fmt.Sprintf("/projects?private_token=%s", sess.GithubAccessToken))
+  b.WriteString(fmt.Sprintf("/projects?per_page=100&private_token=%s", sess.GithubAccessToken))
+  apiUrl := b.String()
+  url := apiUrl
+  reps := make([]GitlabRepo, 0)
 
-  resp, err := http.Get(b.String())
-  if err != nil {
-    return nil, err
-  }
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	reps := make([]GitlabRepo, 0)
+  // gitlab api pagination is in the header
+  // while loop that breaks when the last page is reached
+  for {
+    body, err, header := HandleApiCall(url, sess.GithubAccessToken)
+    if err != nil {
+      return nil, err
+      }
+    repsNext := make([]GitlabRepo, 0)
+    errJson := json.Unmarshal(body, &repsNext)
+    reps = append(reps, repsNext...)
+    if errJson != nil {
+      return nil, errJson
+    }
+    if !Equal(header["X-Page"], header["X-Total-Pages"]) {
+      url = apiUrl + fmt.Sprintf("&page=%s", header["X-Next-Page"][0])
+      continue
+      }
+    break
+   }
 
-	errJson := json.Unmarshal(body, &reps)
 
-	if errJson != nil {
-		return nil, errJson
-	}
-
-
-
-	return reps, nil
+  return reps, nil
   //opt := &gitlab.ListProjectsOptions{
   //  //Simple: true,
   //}
-	//forkParent:=gitlab.ForkParent{}
+  //forkParent:=gitlab.ForkParent{}
 
   //for {
   //  repos, resp, err := client.Projects.ListProjects(opt)

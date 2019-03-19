@@ -159,6 +159,7 @@ func AnalyzeRepositories(sess *core.Session) {
                   Description:     signature.Description(),
                   Comment:         signature.Comment(),
                   //RepositoryOwner: repo.Owner,
+                  RepositoryUrl:   repo.HttpUrlToRepo,
                   RepositoryName:  repo.Name,
                   CommitHash:      commit.Hash.String(),
                   CommitMessage:   strings.TrimSpace(commit.Message),
