@@ -109,20 +109,18 @@ func GetUserOrOrganization(login string, sess *Session) (*GitlabOwner, error) {
 }
 
 func GetRepositoriesFromOwner(login string, sess *Session) ([]GitlabRepo, error) {
-  //var b bytes.Buffer
+  var b bytes.Buffer
 
-  //b.WriteString(*sess.Options.BaseUrl)
-  //b.WriteString(fmt.Sprintf("/projects?primate_token=%s", sess.GithubAccessToken))
+  b.WriteString(*sess.Options.BaseUrl)
+  b.WriteString(fmt.Sprintf("/projects?private_token=%s", sess.GithubAccessToken))
 
-	urlString := "https://git.ckmnet.co/api/v4/projects?private_token=7qNxJyvYUP4shCGMP2-Y"
-  resp, err := http.Get(urlString)
+  resp, err := http.Get(b.String())
   if err != nil {
     return nil, err
   }
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	reps := make([]GitlabRepo, 0)
-	//responseObject := Response{}
 
 	errJson := json.Unmarshal(body, &reps)
 
